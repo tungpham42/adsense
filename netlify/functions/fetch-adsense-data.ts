@@ -30,53 +30,61 @@ export const handler: Handler = async (event) => {
       const { tokens } = await oauth2Client.getToken(code);
       oauth2Client.setCredentials(tokens);
 
-      // List available AdSense accounts (e.g., "accounts/pub-xxxxxxxx")
       const accountsRes = await adsense.accounts.list();
 
       return {
         statusCode: 200,
         body: JSON.stringify({
-          tokens, // Return tokens to frontend to store in state/localstorage
+          tokens,
           accounts: accountsRes.data.accounts || [],
         }),
       };
     }
 
-    // SCENARIO 2: Fetching Report (Using stored Tokens)
+    // SCENARIO 2: Fetching Report
     if (providedTokens && accountId) {
       oauth2Client.setCredentials(providedTokens);
 
-      // Generate Report: Grouped by SITE (Domain Name)
+      // Generate Report
+      // FIX: We only request the RAW metrics that are 100% supported.
       const report = await adsense.accounts.reports.generate({
         account: accountId,
         dateRange: "LAST_30_DAYS",
-        metrics: [
-          "ESTIMATED_EARNINGS",
-          "PAGE_VIEWS",
-          "IMPRESSIONS",
-          "CLICKS",
-          "IMPRESSION_RPM",
-          "ACTIVE_VIEW_VIEWABILITY",
-        ],
+        metrics: ["ESTIMATED_EARNINGS", "PAGE_VIEWS", "IMPRESSIONS", "CLICKS"],
         dimensions: ["DOMAIN_NAME"],
-        orderBy: ["+ESTIMATED_EARNINGS"], // Sort by earnings descending
+        orderBy: ["+ESTIMATED_EARNINGS"],
       });
 
-      // Format data for the frontend
       const rawRows = report.data.rows || [];
-      const formattedData = rawRows.map((row: any) => ({
-        site: row.cells[0].value,
-        earnings: parseFloat(row.cells[1].value),
-        pageViews: parseInt(row.cells[2].value),
-        impressions: parseInt(row.cells[3].value),
-        clicks: parseInt(row.cells[4].value),
-        rpm: parseFloat(row.cells[5].value),
-        // Calculate CTR manually (Clicks / Impressions)
-        ctr:
-          parseInt(row.cells[3].value) > 0
-            ? parseInt(row.cells[4].value) / parseInt(row.cells[3].value)
-            : 0,
-      }));
+
+      const formattedData = rawRows.map((row: any) => {
+        // Cells order matches the 'metrics' array order above + dimensions first
+        // Dimension [0] = DOMAIN_NAME
+        // Metric [1] = ESTIMATED_EARNINGS
+        // Metric [2] = PAGE_VIEWS
+        // Metric [3] = IMPRESSIONS
+        // Metric [4] = CLICKS
+
+        const earnings = parseFloat(row.cells[1].value);
+        const pageViews = parseInt(row.cells[2].value);
+        const impressions = parseInt(row.cells[3].value);
+        const clicks = parseInt(row.cells[4].value);
+
+        return {
+          site: row.cells[0].value,
+          earnings: earnings,
+          pageViews: pageViews,
+          impressions: impressions,
+          clicks: clicks,
+
+          // MANUAL CALCULATION (The Fix)
+          // RPM = (Earnings / Page Views) * 1000
+          rpm: pageViews > 0 ? (earnings / pageViews) * 1000 : 0,
+
+          // CTR = Clicks / Impressions
+          ctr: impressions > 0 ? clicks / impressions : 0,
+        };
+      });
 
       return {
         statusCode: 200,
