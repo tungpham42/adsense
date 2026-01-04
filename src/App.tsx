@@ -241,7 +241,7 @@ const App = () => {
     }
   };
 
-  // --- TABLE COLUMNS ---
+  // --- TABLE COLUMNS (UPDATED WITH SORTERS) ---
   const columns = [
     {
       title: "Site Domain",
@@ -275,18 +275,21 @@ const App = () => {
       title: "Page Views",
       dataIndex: "pageViews",
       key: "pageViews",
+      sorter: (a: any, b: any) => a.pageViews - b.pageViews,
       render: (val: number) => <Text>{val.toLocaleString()}</Text>,
     },
     {
       title: "RPM",
       dataIndex: "rpm",
       key: "rpm",
+      sorter: (a: any, b: any) => a.rpm - b.rpm,
       render: (val: number) => <Text type="secondary">${val.toFixed(2)}</Text>,
     },
     {
       title: "CTR",
       dataIndex: "ctr",
       key: "ctr",
+      sorter: (a: any, b: any) => a.ctr - b.ctr,
       render: (v: number) => {
         const percentage = (v * 100).toFixed(2);
         let color = "blue";
@@ -642,7 +645,6 @@ const App = () => {
                         dataSource={reportData}
                         columns={columns}
                         rowKey="site"
-                        pagination={{ pageSize: 6 }}
                         scroll={{ x: 600 }}
                         style={{ borderRadius: "0 0 24px 24px" }}
                       />
