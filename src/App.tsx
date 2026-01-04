@@ -21,6 +21,8 @@ import {
   Statistic,
   Row,
   Col,
+  Alert,
+  Badge,
 } from "antd";
 import {
   GoogleOutlined,
@@ -29,6 +31,8 @@ import {
   ThunderboltFilled,
   GlobalOutlined,
   LogoutOutlined,
+  RiseOutlined,
+  SafetyCertificateTwoTone,
 } from "@ant-design/icons";
 import axios from "axios";
 import { jwtDecode } from "jwt-decode";
@@ -45,21 +49,44 @@ interface UserProfile {
 }
 
 interface AdSenseAccount {
-  name: string; // ID (e.g., accounts/pub-xxx)
-  displayName: string; // Readable name
+  name: string;
+  displayName: string;
 }
 
-// --- THEME ---
+// --- THEME CONFIGURATION ---
 const themeConfig = {
   token: {
     fontFamily: "'Work Sans', sans-serif",
-    colorPrimary: "#1677ff",
-    borderRadius: 8,
+    colorPrimary: "#2b6de3", // Bolder Blue
+    colorSuccess: "#10b981", // Modern Green
+    colorWarning: "#f59e0b",
+    borderRadius: 12,
+    fontSize: 15,
+    boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+  },
+  components: {
+    Button: {
+      fontWeight: 600,
+      controlHeight: 44,
+      borderRadius: 10,
+    },
+    Card: {
+      headerFontSize: 18,
+      headerFontWeight: 700,
+    },
+    Select: {
+      controlHeight: 44,
+    },
+    Table: {
+      headerBg: "transparent",
+      headerColor: "#666",
+      rowHoverBg: "#f0f7ff",
+    },
   },
 };
 
 const App = () => {
-  // --- STATE (With LocalStorage Persistence) ---
+  // --- STATE ---
   const [user, setUser] = useState<UserProfile | null>(() => {
     const saved = localStorage.getItem("adsense_user");
     return saved ? JSON.parse(saved) : null;
@@ -70,9 +97,25 @@ const App = () => {
     return saved ? JSON.parse(saved) : null;
   });
 
-  const [accounts, setAccounts] = useState<AdSenseAccount[]>([]);
-  const [reportData, setReportData] = useState<any[]>([]);
-  const [insights, setInsights] = useState<string[]>([]);
+  const [accounts, setAccounts] = useState<AdSenseAccount[]>(() => {
+    const saved = localStorage.getItem("adsense_accounts");
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  const [selectedAccount, setSelectedAccount] = useState<string | null>(() => {
+    return localStorage.getItem("adsense_selected_account");
+  });
+
+  const [reportData, setReportData] = useState<any[]>(() => {
+    const saved = localStorage.getItem("adsense_report");
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  const [insights, setInsights] = useState<string[]>(() => {
+    const saved = localStorage.getItem("adsense_insights");
+    return saved ? JSON.parse(saved) : [];
+  });
+
   const [loading, setLoading] = useState(false);
 
   // --- PERSISTENCE ---
@@ -86,22 +129,46 @@ const App = () => {
     else localStorage.removeItem("adsense_tokens");
   }, [tokens]);
 
-  // --- AUTHENTICATION ---
+  useEffect(() => {
+    if (accounts.length > 0)
+      localStorage.setItem("adsense_accounts", JSON.stringify(accounts));
+    else localStorage.removeItem("adsense_accounts");
+  }, [accounts]);
 
-  // 1. One Tap Login (Identity)
+  useEffect(() => {
+    if (selectedAccount)
+      localStorage.setItem("adsense_selected_account", selectedAccount);
+    else localStorage.removeItem("adsense_selected_account");
+  }, [selectedAccount]);
+
+  useEffect(() => {
+    if (reportData.length > 0)
+      localStorage.setItem("adsense_report", JSON.stringify(reportData));
+    else localStorage.removeItem("adsense_report");
+  }, [reportData]);
+
+  useEffect(() => {
+    if (insights.length > 0)
+      localStorage.setItem("adsense_insights", JSON.stringify(insights));
+    else localStorage.removeItem("adsense_insights");
+  }, [insights]);
+
+  // --- AUTH ---
   useGoogleOneTapLogin({
     onSuccess: (credentialResponse) => {
       if (credentialResponse.credential) {
         const decoded = jwtDecode<UserProfile>(credentialResponse.credential);
         setUser(decoded);
-        message.success(`Welcome back, ${decoded.name}!`);
+        message.success({
+          content: `Welcome back, ${decoded.name}!`,
+          icon: <SafetyCertificateTwoTone twoToneColor="#52c41a" />,
+        });
       }
     },
     onError: () => console.log("One Tap skipped"),
     disabled: !!user,
   });
 
-  // 2. OAuth Flow (Permission for AdSense Data)
   const connectAdSense = useGoogleLogin({
     onSuccess: async (codeResponse) => {
       setLoading(true);
@@ -127,16 +194,18 @@ const App = () => {
     googleLogout();
     setUser(null);
     setTokens(null);
+    setAccounts([]);
+    setSelectedAccount(null);
     setReportData([]);
     setInsights([]);
     localStorage.clear();
   };
 
-  // --- DATA HANDLING ---
-
   const handleAccountSelect = async (accountId: string) => {
+    setSelectedAccount(accountId);
     setLoading(true);
-    setInsights([]); // Reset insights on new selection
+    setInsights([]);
+    setReportData([]);
 
     try {
       const res = await axios.post("/.netlify/functions/fetch-adsense-data", {
@@ -148,7 +217,6 @@ const App = () => {
       setReportData(rows || []);
 
       if (rows && rows.length > 0) {
-        // Trigger AI Analysis automatically if data exists
         analyzeData(rows);
       } else {
         message.info("No data found for the last 30 days.");
@@ -163,7 +231,6 @@ const App = () => {
 
   const analyzeData = async (data: any[]) => {
     try {
-      // Send top 10 rows to AI to save context window/tokens
       const res = await axios.post("/.netlify/functions/analyze-adsense", {
         adsenseData: data.slice(0, 10),
       });
@@ -179,14 +246,27 @@ const App = () => {
     {
       title: "Site Domain",
       dataIndex: "site",
-      render: (t: string) => <Text strong>{t}</Text>,
+      key: "site",
+      render: (t: string) => (
+        <Space>
+          <Avatar
+            src={`https://www.google.com/s2/favicons?domain=${t}&sz=128`}
+            shape="square"
+            size="small"
+          />
+          <Text strong style={{ fontSize: 16 }}>
+            {t}
+          </Text>
+        </Space>
+      ),
     },
     {
       title: "Earnings",
       dataIndex: "earnings",
+      key: "earnings",
       sorter: (a: any, b: any) => a.earnings - b.earnings,
       render: (val: number) => (
-        <Text type="success" strong>
+        <Text strong style={{ color: "#10b981", fontSize: 16 }}>
           ${val.toFixed(2)}
         </Text>
       ),
@@ -194,200 +274,369 @@ const App = () => {
     {
       title: "Page Views",
       dataIndex: "pageViews",
-      render: (val: number) => val.toLocaleString(),
+      key: "pageViews",
+      render: (val: number) => <Text>{val.toLocaleString()}</Text>,
     },
     {
       title: "RPM",
       dataIndex: "rpm",
-      render: (val: number) => `$${val.toFixed(2)}`,
+      key: "rpm",
+      render: (val: number) => <Text type="secondary">${val.toFixed(2)}</Text>,
     },
     {
       title: "CTR",
       dataIndex: "ctr",
+      key: "ctr",
       render: (v: number) => {
         const percentage = (v * 100).toFixed(2);
-        let color = "default";
-        if (v > 0.05) color = "orange"; // Warning high
-        if (v > 0.01 && v <= 0.05) color = "green"; // Good
-        return <Tag color={color}>{percentage}%</Tag>;
+        let color = "blue";
+        if (v > 0.05) color = "warning";
+        if (v > 0.01 && v <= 0.05) color = "success";
+        return (
+          <Tag color={color} style={{ fontWeight: 600, borderRadius: 12 }}>
+            {percentage}%
+          </Tag>
+        );
       },
     },
   ];
 
   return (
     <ConfigProvider theme={themeConfig}>
-      <Layout style={{ minHeight: "100vh", background: "#f8fafc" }}>
-        {/* HEADER */}
-        <Header
-          style={{
-            background: "#fff",
-            borderBottom: "1px solid #e2e8f0",
-            padding: "0 24px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <DollarCircleOutlined style={{ fontSize: 24, color: "#1677ff" }} />
-            <Title level={4} style={{ margin: 0 }}>
-              AdSense<span style={{ color: "#1677ff" }}>AI</span>
-            </Title>
-          </div>
-          {user && (
-            <Space>
-              <Avatar src={user.picture} />
-              <Button
-                type="text"
-                icon={<LogoutOutlined />}
-                onClick={handleLogout}
+      <Layout style={{ minHeight: "100vh", background: "transparent" }}>
+        {/* --- HEADER --- */}
+        <Header className="glass-header">
+          <div
+            className="container-max"
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              height: "100%",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div
+                style={{
+                  background: themeConfig.token.colorPrimary,
+                  borderRadius: 8,
+                  width: 32,
+                  height: 32,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
               >
-                Sign Out
-              </Button>
-            </Space>
-          )}
+                <DollarCircleOutlined
+                  style={{ fontSize: 20, color: "white" }}
+                />
+              </div>
+              <Title level={4} style={{ margin: 0, letterSpacing: -0.5 }}>
+                AdSense
+                <span style={{ color: themeConfig.token.colorPrimary }}>
+                  AI
+                </span>
+              </Title>
+            </div>
+            {user && (
+              <Space size="large">
+                <Space>
+                  <Avatar
+                    src={user.picture}
+                    style={{
+                      border: "2px solid #fff",
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+                    }}
+                  />
+                  <div style={{ lineHeight: 1.2, display: "none" }}>
+                    <Text strong style={{ display: "block" }}>
+                      {user.name}
+                    </Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      Publisher
+                    </Text>
+                  </div>
+                </Space>
+                <Button
+                  type="text"
+                  icon={<LogoutOutlined />}
+                  onClick={handleLogout}
+                  danger
+                />
+              </Space>
+            )}
+          </div>
         </Header>
 
-        <Content
-          style={{
-            padding: "32px",
-            maxWidth: 1200,
-            margin: "0 auto",
-            width: "100%",
-          }}
-        >
-          {/* VIEW 1: NOT LOGGED IN */}
+        <Content style={{ padding: "40px 24px" }} className="container-max">
+          {/* --- SCENARIO 1: LOGGED OUT --- */}
           {!user && (
-            <div style={{ textAlign: "center", marginTop: 100 }}>
-              <Title level={2}>AdSense Intelligence Dashboard</Title>
-              <Paragraph type="secondary">
-                Sign in to analyze your sites, RPM, and Earnings with AI.
-              </Paragraph>
-              <Button type="primary" size="large" disabled>
-                Use the Google Prompt to Sign In
-              </Button>
+            <div className="hero-container animate-fade-in">
+              <div className="hero-card">
+                <ThunderboltFilled
+                  style={{
+                    fontSize: 48,
+                    color: themeConfig.token.colorPrimary,
+                    marginBottom: 24,
+                  }}
+                />
+                <Title level={1} style={{ marginBottom: 16 }}>
+                  Unlock Revenue Insights
+                </Title>
+                <Paragraph
+                  type="secondary"
+                  style={{ fontSize: 18, marginBottom: 40 }}
+                >
+                  Leverage AI to analyze your AdSense performance, detect RPM
+                  anomalies, and optimize earnings effortlessly.
+                </Paragraph>
+                <div style={{ position: "relative" }}>
+                  {/* Google One Tap handles the actual button logic usually, but we show visual state */}
+                  <Button
+                    type="primary"
+                    size="large"
+                    shape="round"
+                    disabled
+                    style={{ width: "100%", height: 56, fontSize: 18 }}
+                  >
+                    Sign in with Google
+                  </Button>
+                  <Text
+                    type="secondary"
+                    style={{ display: "block", marginTop: 12, fontSize: 12 }}
+                  >
+                    Secure access via Google Identity Services
+                  </Text>
+                </div>
+              </div>
             </div>
           )}
 
-          {/* VIEW 2: LOGGED IN, NEEDS ADSENSE ACCESS */}
+          {/* --- SCENARIO 2: CONNECT ADSENSE --- */}
           {user && !tokens && (
-            <Card
+            <div
               style={{
-                textAlign: "center",
-                maxWidth: 500,
-                margin: "40px auto",
-                padding: 20,
+                display: "flex",
+                justifyContent: "center",
+                marginTop: 80,
               }}
+              className="animate-fade-in"
             >
-              <Title level={3}>Connect Data Source</Title>
-              <Paragraph>
-                Grant read-only access to your AdSense reports.
-              </Paragraph>
-              <Button
-                type="primary"
-                size="large"
-                icon={<GoogleOutlined />}
-                onClick={() => connectAdSense()}
-                loading={loading}
+              <Card
+                className="modern-card"
+                style={{
+                  maxWidth: 600,
+                  width: "100%",
+                  textAlign: "center",
+                  padding: 40,
+                }}
               >
-                Connect AdSense Account
-              </Button>
-            </Card>
+                <Title level={2}>One Last Step</Title>
+                <Paragraph style={{ fontSize: 16, marginBottom: 32 }}>
+                  We need read-only access to your AdSense reports to generate
+                  insights. Your data is processed securely and never stored
+                  permanently.
+                </Paragraph>
+                <Button
+                  type="primary"
+                  size="large"
+                  icon={<GoogleOutlined />}
+                  onClick={() => connectAdSense()}
+                  loading={loading}
+                  style={{ height: 50, padding: "0 40px" }}
+                >
+                  Connect AdSense Data
+                </Button>
+              </Card>
+            </div>
           )}
 
-          {/* VIEW 3: MAIN DASHBOARD */}
+          {/* --- SCENARIO 3: DASHBOARD --- */}
           {user && tokens && (
-            <Space direction="vertical" size="large" style={{ width: "100%" }}>
-              {/* Controls Bar */}
-              <Card bodyStyle={{ padding: "16px 24px" }}>
-                <Row align="middle" justify="space-between" gutter={[16, 16]}>
-                  <Col>
-                    <Space>
-                      <GlobalOutlined style={{ color: "#1677ff" }} />
-                      <Text strong>Select Account:</Text>
+            <Space
+              direction="vertical"
+              size={32}
+              style={{ width: "100%" }}
+              className="animate-fade-in"
+            >
+              {/* Top Controls & KPI */}
+              <Row gutter={[24, 24]} align="middle">
+                <Col xs={24} md={16}>
+                  <Card
+                    className="modern-card"
+                    bordered={false}
+                    bodyStyle={{ padding: 24 }}
+                  >
+                    <Space
+                      direction="vertical"
+                      size={4}
+                      style={{ width: "100%" }}
+                    >
+                      <Text
+                        type="secondary"
+                        strong
+                        style={{
+                          fontSize: 12,
+                          textTransform: "uppercase",
+                          letterSpacing: 1,
+                        }}
+                      >
+                        Select Property
+                      </Text>
                       <Select
-                        style={{ width: 280 }}
-                        placeholder="Choose Publisher ID..."
+                        size="large"
+                        style={{ width: "100%", maxWidth: 400 }}
+                        placeholder="Select an AdSense Account..."
+                        value={selectedAccount}
                         onChange={handleAccountSelect}
                         loading={loading}
+                        suffixIcon={<GlobalOutlined />}
                         options={accounts.map((acc) => ({
                           label: acc.displayName,
                           value: acc.name,
                         }))}
+                        variant="borderless"
+                        popupMatchSelectWidth={false}
+                        dropdownStyle={{ borderRadius: 12, padding: 8 }}
                       />
                     </Space>
-                  </Col>
-                  {reportData.length > 0 && (
-                    <Col>
+                  </Card>
+                </Col>
+                <Col xs={24} md={8}>
+                  {reportData.length > 0 ? (
+                    <Card
+                      className="modern-card stat-card"
+                      bodyStyle={{ padding: 24, width: "100%" }}
+                    >
                       <Statistic
-                        title="Total 30-Day Earnings"
+                        title={
+                          <Text type="secondary">Total 30-Day Earnings</Text>
+                        }
                         value={reportData.reduce(
                           (acc, curr) => acc + curr.earnings,
                           0
                         )}
                         precision={2}
-                        prefix="$"
-                        valueStyle={{ color: "#3f8600", fontWeight: "bold" }}
+                        prefix={
+                          <DollarCircleOutlined style={{ color: "#10b981" }} />
+                        }
+                        valueStyle={{
+                          color: "#1f1f1f",
+                          fontWeight: 700,
+                          fontSize: 32,
+                        }}
                       />
-                    </Col>
+                    </Card>
+                  ) : (
+                    <Alert
+                      message="Select an account to view earnings"
+                      type="info"
+                      showIcon
+                      style={{ borderRadius: 12 }}
+                    />
                   )}
-                </Row>
-              </Card>
+                </Col>
+              </Row>
 
-              {/* Data & AI Area */}
               {reportData.length > 0 && (
                 <Row gutter={[24, 24]}>
-                  {/* AI Insights Sidebar */}
+                  {/* Left: AI Insights */}
                   <Col xs={24} lg={8}>
                     <Card
+                      className="modern-card ai-card"
                       title={
                         <Space>
-                          <RobotOutlined style={{ color: "#722ed1" }} /> AI
-                          Insights
+                          <RobotOutlined
+                            style={{ color: "#722ed1", fontSize: 20 }}
+                          />
+                          <span style={{ color: "#4c1d95" }}>
+                            Smart Insights
+                          </span>
                         </Space>
                       }
-                      style={{
-                        height: "100%",
-                        background: "#f9f0ff",
-                        borderColor: "#d3adf7",
-                      }}
+                      extra={
+                        insights.length > 0 && (
+                          <Badge
+                            status="processing"
+                            text="Live"
+                            color="#722ed1"
+                          />
+                        )
+                      }
+                      style={{ height: "100%" }}
                     >
                       {insights.length > 0 ? (
-                        <Space direction="vertical" style={{ width: "100%" }}>
+                        <Space
+                          direction="vertical"
+                          size={16}
+                          style={{ width: "100%" }}
+                        >
                           {insights.map((insight, idx) => (
-                            <Card
+                            <div
                               key={idx}
-                              size="small"
-                              type="inner"
-                              style={{ borderLeft: "4px solid #722ed1" }}
+                              style={{
+                                background: "white",
+                                padding: 16,
+                                borderRadius: 16,
+                                boxShadow:
+                                  "0 4px 12px rgba(114, 46, 209, 0.05)",
+                                border: "1px solid rgba(114, 46, 209, 0.1)",
+                              }}
                             >
-                              <Text>{insight}</Text>
-                            </Card>
+                              <Space align="start">
+                                <RiseOutlined
+                                  style={{ color: "#722ed1", marginTop: 4 }}
+                                />
+                                <Text
+                                  style={{ fontSize: 14, color: "#4b5563" }}
+                                >
+                                  {insight}
+                                </Text>
+                              </Space>
+                            </div>
                           ))}
                         </Space>
                       ) : (
-                        <div style={{ textAlign: "center", padding: "40px 0" }}>
+                        <div
+                          style={{ textAlign: "center", padding: "60px 20px" }}
+                        >
                           <Spin
+                            size="large"
                             indicator={
                               <ThunderboltFilled
-                                style={{ fontSize: 24, color: "#722ed1" }}
+                                style={{ fontSize: 36, color: "#722ed1" }}
                                 spin
                               />
                             }
                           />
-                          <div style={{ marginTop: 16, color: "#722ed1" }}>
-                            Analyzing RPM trends...
+                          <div
+                            style={{
+                              marginTop: 24,
+                              fontWeight: 600,
+                              color: "#722ed1",
+                            }}
+                          >
+                            Analyzing Traffic & RPM...
                           </div>
+                          <Text type="secondary">
+                            Our AI is crunching the numbers for you.
+                          </Text>
                         </div>
                       )}
                     </Card>
                   </Col>
 
-                  {/* Main Table */}
+                  {/* Right: Data Table */}
                   <Col xs={24} lg={16}>
                     <Card
-                      title="Site Performance Report"
-                      extra={<Tag color="blue">Last 30 Days</Tag>}
+                      className="modern-card"
+                      title="Performance by Site"
+                      extra={
+                        <Button type="dashed" shape="round">
+                          Last 30 Days
+                        </Button>
+                      }
+                      bodyStyle={{ padding: 0 }}
                     >
                       <Table
                         dataSource={reportData}
@@ -395,6 +644,7 @@ const App = () => {
                         rowKey="site"
                         pagination={{ pageSize: 6 }}
                         scroll={{ x: 600 }}
+                        style={{ borderRadius: "0 0 24px 24px" }}
                       />
                     </Card>
                   </Col>
